@@ -9,13 +9,14 @@
 
 
 # Globals
-NASM_VERSION="2.14rc15"
+NASM_VERSION="2.14.03rc2"
 YASM_VERSION="1.3.0"
 LAME_VERSION="3.100"
-OPUS_VERSION="1.2.1"
+OPUS_VERSION="1.3.1"
 LASS_VERSION="0.14.0"
-CUDA_VERSION="10.0.130-1"
-CUDA_REPO_KEY="http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/7fa2af80.pub"
+CUDA_VERSION="10.2.89-1"
+LIBTENSORFLOW_VERSION="1.15.0"
+CUDA_REPO_KEY="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub"
 CUDA_DIR="/usr/local/cuda"
 WORK_DIR="$HOME/ffmpeg-build-static-sources"
 DEST_DIR="$HOME/ffmpeg-build-static-binaries"
@@ -42,14 +43,16 @@ Clone() {
     git pull
 }
 
-PKGS="autoconf automake libtool patch make cmake bzip2 unzip wget git mercurial cmake3"
+PKGS="autoconf automake libtool patch make cmake bzip2 unzip wget git mercurial cmake3 meson ninja"
 
 installAptLibs() {
-    sudo apt-get update
-    sudo apt-get -y --force-yes install $PKGS \
+    sudo apt update
+    sudo apt -y --force-yes install $PKGS \
       build-essential pkg-config texi2html software-properties-common \
       libfreetype6-dev libgpac-dev libsdl1.2-dev libtheora-dev libva-dev \
-      libvdpau-dev libvorbis-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev zlib1g-dev
+      libvdpau-dev libvorbis-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev zlib1g-dev \
+      libchromaprint-dev ladspa-sdk libaribb24-dev libbs2b-dev libcaca-dev libcodec2-dev \
+      libopencv-dev librtmp-dev
 }
 
 installYumLibs() {
@@ -68,16 +71,16 @@ installLibs() {
 
 installCUDASDKdeb() {
     UBUNTU_VERSION="$1"
-    local CUDA_REPO_URL="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${UBUNTU_VERSION}/x86_64/cuda-repo-ubuntu1804_${CUDA_VERSION}_amd64.deb"
+    local CUDA_REPO_URL="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${UBUNTU_VERSION}/x86_64/cuda-repo-ubuntu${UBUNTU_VERSION}_${CUDA_VERSION}_amd64.deb"
     Wget "$CUDA_REPO_URL"
     sudo dpkg -i "$(basename "$CUDA_REPO_URL")"
     sudo apt-key adv --fetch-keys "$CUDA_REPO_KEY"
-    sudo apt-get -y update
-    sudo apt-get -y install cuda
+    sudo apt -y update
+    sudo apt -y install cuda
 
     sudo env LC_ALL=C.UTF-8 add-apt-repository -y ppa:graphics-drivers/ppa
-    sudo apt-get -y update
-    sudo apt-get -y upgrade
+    sudo apt -y update
+    sudo apt -y upgrade
 }
 
 installCUDASDKyum() {
@@ -132,10 +135,10 @@ compileYasm() {
 compileLibX264() {
     echo "Compiling libx264"
     cd "$WORK_DIR/"
-    Wget http://download.videolan.org/pub/x264/snapshots/last_x264.tar.bz2
-    rm -rf x264-snapshot*/ || :
-    tar xjvf last_x264.tar.bz2
-    cd x264-snapshot*
+    Wget "https://code.videolan.org/videolan/x264/-/archive/master/x264-master.tar.bz2"
+    rm -rf x264-master/ || :
+    tar xjvf x264-master.tar.bz2
+    cd x264-master
     ./configure --prefix="$DEST_DIR" --bindir="$DEST_DIR/bin" --enable-static --enable-pic
     Make install distclean
 }
@@ -220,6 +223,44 @@ compileLibAss() {
     Make install distclean
 }
 
+compileLibfrei0r() {
+    echo "Compiling libfrei0r"
+    Clone https://github.com/dyne/frei0r
+    cd ../frei0r
+    which cmake3 && PROG=cmake3 || PROG=cmake
+    cmake .
+    make
+    sudo make install
+}
+
+compileLibtensorflow() {
+    echo "Compiling libtensorflow"
+    cd "$WORK_DIR/"
+    Wget "https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-gpu-linux-x86_64-$LIBTENSORFLOW_VERSION.tar.gz"
+    sudo tar -C /usr/local -xzf "libtensorflow-gpu-linux-x86_64-$LIBTENSORFLOW_VERSION.tar.gz"
+    sudo ldconfig
+}
+
+compileLibopencv() {
+    echo "Compiling libopencv"
+    Clone https://github.com/opencv/opencv.git
+    mkdir ../opencv
+    cd ../opencv
+    which cmake3 && PROG=cmake3 || PROG=cmake
+    cmake .
+    make
+    sudo make install
+}
+
+compileLibvmaf() {
+    echo "Compiling libvmaf"
+    Clone https://github.com/Netflix/vmaf.git
+    cd ../vmaf/libvmaf
+    meson build --buildtype release
+    ninja -vC build
+    ninja -vC build install
+}
+
 compileFfmpeg(){
     echo "Compiling ffmpeg"
     Clone https://github.com/FFmpeg/FFmpeg -b master
@@ -233,43 +274,57 @@ compileFfmpeg(){
       --extra-cflags="-I $DEST_DIR/include -I $CUDA_DIR/include/" \
       --extra-ldflags="-L $DEST_DIR/lib -L $CUDA_DIR/lib64/" \
       --extra-libs="-lpthread" \
+      --enable-gpl \
+      --enable-version3 \
+      --enable-nonfree \
+      --enable-chromaprint \
+      --enable-ladspa \
+      --enable-libaom \
+      --enable-libaribb24 \
+      --enable-libass \
+      --enable-libbs2b \
+      --enable-libcaca \
+      --enable-libcodec2 \
+      --enable-libtensorflow \
+      --enable-libtesseract \
+      --enable-libvmaf \
+      --enable-libvpx \
+      --enable-libx264 \
+      --enable-libx265 \
+      --enable-cuda-nvcc \
+      --enable-libdrm \
+      --enable-libnpp \
       --enable-cuda \
       --enable-cuda-sdk \
       --enable-cuvid \
-      --enable-libnpp \
-      --enable-gpl \
-      --enable-libass \
+      --enable-nvenc \
       --enable-libfdk-aac \
       --enable-vaapi \
       --enable-libfreetype \
       --enable-libmp3lame \
       --enable-libopus \
-      --enable-libtheora \
-      --enable-libvorbis \
-      --enable-libvpx \
-      --enable-libx264 \
-      --enable-libx265 \
-      --enable-nonfree \
-      --enable-libaom \
-      --enable-nvenc
+      --enable-libvorbis
     Make install distclean
     hash -r
 }
 
-installLibs
-installCUDASDK
-installNvidiaSDK
+#installLibs
+#installCUDASDK
+#installNvidiaSDK
 
-compileNasm
-compileYasm
-compileLibX264
-compileLibX265
-compileLibAom
-compileLibVpx
-compileLibfdkcc
-compileLibMP3Lame
-compileLibOpus
-compileLibAss
+#compileNasm
+#compileYasm
+#compileLibX264
+#compileLibX265
+#compileLibAom
+#compileLibVpx
+#compileLibfdkcc
+#compileLibMP3Lame
+#compileLibOpus
+#compileLibAss
+#compileLibfrei0r
+#compileLibtensorflow
+#compileLibvmaf
 # TODO: libogg
 # TODO: libvorbis
 compileFfmpeg
